@@ -1,0 +1,86 @@
+---
+
+#    Created by - Thanh Nguyen 
+#    Based on https://github.com/sebbycorp/ansible-f5-upload-install-os/blob/master/inventory/hosts 
+#    This task comes with no warranty or support
+#
+#    Module Documentation: https://docs.ansible.com/ansible/2.9/modules/list_of_all_modules.html
+#    VARs pulled from inventory file
+#    
+
+- name: GRAB F5 FACTS
+  hosts: f5-inventory
+  connection: local
+  gather_facts: false
+  vars:
+    provider:
+      server: "{{f5_private_ip}}"
+      user: "{{f5_ssh_user}}"
+      password: "{{f5_ssh_pass}}"
+      server_port: 443
+      validate_certs: false
+
+  tasks:
+    - name: Save the running configuration
+      bigip_config:
+        save: yes
+        provider: "{{ provider }}"
+      tags:
+        - save_running_config
+
+    - name: Download a new UCS to local directory
+      bigip_ucs_fetch:
+        src: cs_backup.ucs
+        dest: /tmp/f5/ucs_archive/{{f5_private_ip}}_cs_backup.ucs
+        provider: "{{ provider }}"
+      tags:
+        - download_ucs_file_from_f5
+
+    - name: Upload absolute image to the BIG-IP
+      bigip_software_image:
+        image: /tmp/f5/images/BIGIP-16.0.0-0.0.12.iso
+        provider: "{{ provider }}"
+      tags:
+        - upload_tmosimage_bigip
+
+    - name: Installs the BIG-IP OS
+      bigip_software_install:
+        image: BIGIP-16.0.0-0.0.12.iso
+        volume: HD1.2
+        state: installed
+        provider: "{{ provider }}"
+      tags:
+        - install_bigip
+
+    - name: Verify the new BIG_IP OS was installed
+      bigip_device_info:
+        gather_subset: 
+          - software-volumes
+        provider: "{{ provider }}"
+      register: bigip_software_install
+      tags:
+        - verify_new_os_in_staging
+
+    - name: Displays the device info
+      debug:
+        var: bigip_software_install
+      tags:
+        - verify_new_os_in_staging
+
+    - name: Copy the config from HD1.1 to HD1.2 cpcfg --source=HD1.1 --reboot HD1.2    
+      raw: curl -u "{{f5_ssh_user}}":"{{f5_ssh_pass}}" -k https://"{{f5_fqdn}}":443/mgmt/tm/util/bash  -H "Content-type:application/json" -d "{\"command\":\"run\",\"utilCmdArgs\":\"-c 'cpcfg --source=HD1.1 --reboot HD1.2'\"}"
+      ignore_errors: True
+      register: cpcfg
+
+    - name: Verify the system was rebooted to new OS
+      bigip_command:
+        commands:
+          - show sys software status
+        provider: "{{ provider }}"
+      register: device_facts
+      tags:
+        - verify_reboot_new_os
+
+    - name: Display
+      debug:
+        var: device_facts

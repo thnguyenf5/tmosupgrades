@@ -1,0 +1,16 @@
+---
+- hosts: localhost
+  connection: local
+  vars_files:
+    - creds.yml
+  tasks:
+    - name: Verify the system was installed
+      bigip_command:
+        commands:
+          - show sys software status
+        provider: "{{ provider }}"
+      register: device_facts
+
+    - name: Display
+      debug:
+        var: device_facts
